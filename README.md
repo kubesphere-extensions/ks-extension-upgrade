@@ -1,8 +1,8 @@
 # KubeSphere Extension Upgrade
 
-通用的 KubeSphere Extension 升级 Hook, 当前支持以下特性
+通用的 KubeSphere Extension 升级 Hook, 主要解决 **Extension 安装及升级时无法更新 CRD 问题**。当前支持以下特性：
 
-- 支持安装及升级时强制加载 CRD
+- 支持扩展组件安装及升级时强制更新 CRD
 - 支持升级时将当前 InstallPlan Config 与升级版本的默认 Values 进行合并
 - 支持通过配置文件进行参数控制
 - 扩展组件额外支持
