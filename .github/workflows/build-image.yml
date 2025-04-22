@@ -1,0 +1,44 @@
+name: WorkFlow for Building Image
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    name: Build Image
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: all
+
+      - name: Set up Docker buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.REGISTRY_USER }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build and Push
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [[ "${{ github.event.ref }}" == refs/tags/v* ]]; then
+            make -e TAG=${TAG} docker-buildx-multi-arch
+          else
+            make -e TAG=latest docker-build
+            make -e TAG=latest docker-push
+          fi
