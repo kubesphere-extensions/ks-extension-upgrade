@@ -1,0 +1,138 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  annotations:
+    executor.kubesphere.io/action: upgrade
+    executor.kubesphere.io/config-hash: a52a75edaacf7a71
+    revisions: '{"1":{"status":"completed","succeed":1,"desire":1,"uid":"1b478b38-f813-49ba-ad4d-9b4806e278e5","start-time":"2025-05-14T10:54:04+08:00","completion-time":"2025-05-14T10:54:56+08:00"}}'
+  creationTimestamp: "2025-05-14T02:54:04Z"
+  generation: 1
+  labels:
+    kubesphere.io/extension-ref: whizard-alerting
+    kubesphere.io/managed: "true"
+    name: helm-upgrade-whizard-alerting-85szhf
+  name: helm-upgrade-whizard-alerting-85szhf
+  namespace: extension-whizard-alerting
+  ownerReferences:
+  - apiVersion: kubesphere.io/v1alpha1
+    kind: InstallPlan
+    name: whizard-alerting
+    uid: 04e44be8-6532-48d2-a392-7d7d455eeb74
+  resourceVersion: "1011085"
+  uid: 1b478b38-f813-49ba-ad4d-9b4806e278e5
+spec:
+  backoffLimit: 0
+  completionMode: NonIndexed
+  completions: 1
+  manualSelector: false
+  parallelism: 1
+  podReplacementPolicy: TerminatingOrFailed
+  selector:
+    matchLabels:
+      batch.kubernetes.io/controller-uid: 1b478b38-f813-49ba-ad4d-9b4806e278e5
+  suspend: false
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        batch.kubernetes.io/controller-uid: 1b478b38-f813-49ba-ad4d-9b4806e278e5
+        batch.kubernetes.io/job-name: helm-upgrade-whizard-alerting-85szhf
+        controller-uid: 1b478b38-f813-49ba-ad4d-9b4806e278e5
+        job-name: helm-upgrade-whizard-alerting-85szhf
+    spec:
+      affinity:
+        podAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: ks-controller-manager
+              namespaces:
+              - kubesphere-system
+              topologyKey: kubernetes.io/hostname
+            weight: 100
+      containers:
+      - command:
+        - /bin/sh
+        - -c
+        - cp -r /tmp/helm-executor-source/. /tmp/helm-executor && helm upgrade --history-max
+          2 --insecure-skip-tls-verify --kubeconfig kube.config --kube-as-user system:serviceaccount:extension-whizard-alerting:helm-executor.whizard-alerting
+          whizard-alerting whizard-alerting.tgz --namespace extension-whizard-alerting
+          --values values.yaml --set tags.extension=true,tags.agent=false,global.portal.url=http://ks-console.kubesphere-system.svc:30880
+          --post-renderer /tmp/helm-executor/helm-post-render.sh --debug --wait --wait-for-jobs
+          --timeout 10m0s
+        env:
+        - name: HELM_CACHE_HOME
+          value: /tmp/helm-executor
+        image: registry.cn-beijing.aliyuncs.com/kubesphereio/kubectl:v1.27.12
+        imagePullPolicy: IfNotPresent
+        name: helm
+        resources:
+          limits:
+            cpu: 500m
+            memory: 500Mi
+          requests:
+            cpu: 100m
+            memory: 100Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /tmp/helm-executor-source
+          name: source
+        - mountPath: /tmp/helm-executor
+          name: data
+        workingDir: /tmp/helm-executor
+      dnsPolicy: ClusterFirst
+      initContainers:
+      - env:
+        - name: HELM_CACHE_HOME
+          value: /tmp/helm-executor
+        - name: HOOK_ACTION
+          value: upgrade
+        - name: CLUSTER_ROLE
+        - name: CLUSTER_NAME
+        - name: INSTALLPLAN_NAME
+          value: whizard-alerting
+        - name: INSTALL_TAG
+          value: extension
+        image: frezes/ks-extension-upgrade:v0.2.4
+        imagePullPolicy: IfNotPresent
+        name: helm-init
+        resources:
+          limits:
+            cpu: 500m
+            memory: 500Mi
+          requests:
+            cpu: 100m
+            memory: 100Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /tmp/helm-executor
+          name: source
+        workingDir: /tmp/helm-executor
+      restartPolicy: Never
+      schedulerName: default-scheduler
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 0
+      volumes:
+      - configMap:
+          defaultMode: 493
+          name: helm-upgrade-whizard-alerting-85szhf
+        name: source
+      - emptyDir: {}
+        name: data
