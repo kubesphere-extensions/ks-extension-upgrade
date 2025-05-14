@@ -71,6 +71,13 @@ func defaultConfig() *Config {
 				MergeValues:   false,
 				FailurePolicy: IgnoreError,
 			},
+			"network": {
+				Enabled:       true,
+				InstallCrds:   true,
+				UpgradeCrds:   true,
+				MergeValues:   false,
+				FailurePolicy: IgnoreError,
+			},
 		},
 	}
 }
