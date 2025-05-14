@@ -57,9 +57,9 @@ func (c *CoreHelper) applyCRDsFromLocalChart(ctx context.Context) error {
 
 	var chartFile string
 	if config.GetHookEnvInstallTag() == config.InstallTagExtension {
-		chartFile = fmt.Sprintf("/tmp/helm-executor-source/%s.tgz", config.GetHookEnvInstallPlanName())
+		chartFile = fmt.Sprintf("/tmp/helm-executor/%s.tgz", config.GetHookEnvInstallPlanName())
 	} else {
-		chartFile = fmt.Sprintf("/tmp/helm-executor-source/%s-agent.tgz", config.GetHookEnvInstallPlanName())
+		chartFile = fmt.Sprintf("/tmp/helm-executor/%s-agent.tgz", config.GetHookEnvInstallPlanName())
 	}
 	chartBuf, err := c.chartDownloader.Download(chartFile)
 	if err != nil {

@@ -64,6 +64,13 @@ func defaultConfig() *Config {
 				MergeValues:   false,
 				FailurePolicy: IgnoreError,
 			},
+			"whizard-alerting": {
+				Enabled:       true,
+				InstallCrds:   true,
+				UpgradeCrds:   true,
+				MergeValues:   false,
+				FailurePolicy: IgnoreError,
+			},
 		},
 	}
 }
