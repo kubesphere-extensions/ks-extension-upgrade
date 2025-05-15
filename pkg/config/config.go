@@ -1,38 +1,29 @@
 package config
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-
-	"dario.cat/mergo"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/klog/v2"
-	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"gopkg.in/yaml.v2"
+	"helm.sh/helm/v3/pkg/chartutil"
 
 	"github.com/kubesphere-extensions/upgrade/pkg/utils/download"
 )
 
 type Config struct {
-	LogLevel                    klog.Level                            `json:"logLevel,omitempty"`
 	DownloadOptions             *download.Options                     `json:"downloadOptions,omitempty"`
 	ExtensionUpgradeHookConfigs map[string]ExtensionUpgradeHookConfig `json:"extensionUpgradeHookConfigs,omitempty"`
 }
 
 type ExtensionUpgradeHookConfig struct {
-	Enabled bool `json:"enabled,omitempty"`
+	Enabled bool `json:"enabled" yaml:"enabled"`
 	// InstallCrds indicates whether to force installation of CRDs when the extension is first installed.
-	InstallCrds bool `json:"installCrds,omitempty"`
+	InstallCrds bool `json:"installCrds,omitempty" yaml:"installCrds,omitempty"`
 	// UpgradeCrds indicates whether to force upgrade of CRDs when the extension version is upgraded. It is invalid when only the extension value is updated.
-	UpgradeCrds bool `json:"upgradeCrds,omitempty"`
+	UpgradeCrds bool `json:"upgradeCrds,omitempty" yaml:"upgradeCrds,omitempty"`
 	// MergeValues ​​indicates whether to merge values ​​when the extension version is upgraded. It is invalid when only the extension value is updated.
-	MergeValues bool `json:"mergeValues,omitempty"`
+	MergeValues bool `json:"mergeValues,omitempty" yaml:"mergeValues,omitempty"`
 	// FailurePolicy indicates the policy to use when an error occurs during the upgrade process.
-	FailurePolicy FailurePolicy `json:"failurePolicy,omitempty"`
+	FailurePolicy FailurePolicy `json:"failurePolicy,omitempty" yaml:"failurePolicy,omitempty"`
 	// DynamicOptions contains dynamic options for the extension.
-	DynamicOptions DynamicOptions `json:"dynamicOptions,omitempty"`
+	DynamicOptions DynamicOptions `json:"dynamicOptions,omitempty" yaml:"dynamicOptions,omitempty"`
 }
 
 type DynamicOptions map[string]interface{}
@@ -46,9 +37,9 @@ const (
 	FailOnError
 )
 
-func defaultConfig() *Config {
+func NewConfig() *Config {
 	return &Config{
-		LogLevel: klog.Level(0),
+		DownloadOptions: download.NewDefaultOptions(),
 		ExtensionUpgradeHookConfigs: map[string]ExtensionUpgradeHookConfig{
 			"whizard-monitoring": {
 				Enabled:       true,
@@ -82,42 +73,27 @@ func defaultConfig() *Config {
 	}
 }
 
-func NewConfig(ctx context.Context, client runtimeclient.Client) (*Config, error) {
-	defaultCfg := defaultConfig()
-	cfg := &Config{}
-
-	if client != nil {
-		cm := &corev1.ConfigMap{}
-
-		namespacedName := types.NamespacedName{
-			Namespace: GetHookEnvConfigCMNamespace(),
-			Name:      GetHookEnvConfigCMName(),
-		}
-
-		if err := client.Get(ctx, namespacedName, cm); err != nil {
-			if errors.IsNotFound(err) {
-				klog.Infof("configmap %s not found, using default config", namespacedName.String())
-				return defaultCfg, nil
-			}
-			klog.Errorf("failed to get configmap %s: %v, using default config", namespacedName.String(), err)
-			return defaultCfg, err
-		}
-		if _, ok := cm.Data[GetHookEnvConfigCMKey()]; !ok {
-			klog.Errorf("configmap key not found, using default config")
-			return defaultCfg, fmt.Errorf("configmap key: %s not found", GetHookEnvConfigCMKey())
-		}
-
-		if err := json.Unmarshal([]byte(cm.Data[GetHookEnvConfigCMKey()]), cfg); err != nil {
-			klog.Errorf("failed to unmarshal configmap data: %v, using default config", err)
-			return defaultCfg, err
-		}
-
-		if err := mergo.Merge(cfg, defaultCfg, mergo.WithOverride); err != nil {
-			klog.Errorf("failed to merge config: %v, using default config", err)
-			return defaultCfg, err
-		}
+func LoadConfigFromHelmValues(values chartutil.Values) (*ExtensionUpgradeHookConfig, error) {
+	if values == nil {
+		return nil, nil
 	}
-	klog.V(3).Infof("config: %v", cfg)
+	global, err := values.Table("global")
+	if err != nil {
+		return nil, err
+	}
+	upgradeConfig, err := global.Table("upgradeConfig")
+	if err != nil {
+		return nil, err
+	}
+	body, err := upgradeConfig.YAML()
+	if err != nil {
+		return nil, err
+	}
 
-	return cfg, nil
+	currentCfg := &ExtensionUpgradeHookConfig{}
+	if err := yaml.Unmarshal([]byte(body), currentCfg); err != nil {
+		return nil, err
+	}
+
+	return currentCfg, nil
 }

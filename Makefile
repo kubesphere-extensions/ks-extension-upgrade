@@ -23,7 +23,7 @@ vet: ## Run go vet against code.
 ##@ Build
 
 build: ## Build binary.
-	go build -o ks-extension-upgrade
+	go build -o bin/ks-extension-upgrade
 
 docker-build: ## Build docker image.
 	docker build -t $(IMAGE) -f Dockerfile .

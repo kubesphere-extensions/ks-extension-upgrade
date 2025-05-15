@@ -32,40 +32,33 @@ func init() {
 
 type WhizardMonitoringHook struct{}
 
-func (h *WhizardMonitoringHook) Run(ctx context.Context, cli client.Client, cfg *config.Config) error {
+func (h *WhizardMonitoringHook) Run(ctx context.Context, cli client.Client, cfg *config.ExtensionUpgradeHookConfig) error {
 
-	if extensionHookConfig, ok := cfg.ExtensionUpgradeHookConfigs[extensionHookName]; ok && extensionHookConfig.Enabled {
-		hook := &upgradeHook{
-			client: cli,
-			cfg:    extensionHookConfig,
+	hook := &upgradeHook{
+		client: cli,
+		cfg:    cfg,
+	}
+
+	chartDownloader, err := download.NewChartDownloader(download.NewDefaultOptions())
+	if err != nil {
+		return fmt.Errorf("failed to create chartDownloader client: %v", err)
+	}
+	hook.chartDownloader = chartDownloader
+
+	installPlan := &kscorev1alpha1.InstallPlan{}
+	if err := cli.Get(ctx, types.NamespacedName{Name: extensionHookName}, installPlan); err != nil {
+		return fmt.Errorf("failed to get install plan %s: %v", extensionHookName, err)
+	}
+
+	expectVersion := version.MustParseSemantic(installPlan.Spec.Extension.Version)
+	currentVersion := version.MustParseSemantic(installPlan.Status.Version)
+
+	v12 := version.MustParseSemantic("1.2.0")
+	// Upgrade from < 1.2.0 to >= 1.2.0
+	if currentVersion.LessThan(v12) && expectVersion.GreaterThan(v12) {
+		if err := hook.installWhizardMonitoringProExtension(ctx, installPlan); err != nil {
+			return fmt.Errorf("failed to run %s hook: %v", extensionHookName, err)
 		}
-
-		if cfg.DownloadOptions == nil {
-			cfg.DownloadOptions = download.NewDefaultOptions()
-		}
-
-		chartDownloader, err := download.NewChartDownloader(cfg.DownloadOptions)
-		if err != nil {
-			return fmt.Errorf("failed to create chartDownloader client: %v", err)
-		}
-		hook.chartDownloader = chartDownloader
-
-		installPlan := &kscorev1alpha1.InstallPlan{}
-		if err := cli.Get(ctx, types.NamespacedName{Name: extensionHookName}, installPlan); err != nil {
-			return fmt.Errorf("failed to get install plan %s: %v", extensionHookName, err)
-		}
-
-		expectVersion := version.MustParseSemantic(installPlan.Spec.Extension.Version)
-		currentVersion := version.MustParseSemantic(installPlan.Status.Version)
-
-		v12 := version.MustParseSemantic("1.2.0")
-		// Upgrade from < 1.2.0 to >= 1.2.0
-		if currentVersion.LessThan(v12) && expectVersion.GreaterThan(v12) {
-			if err := hook.installWhizardMonitoringProExtension(ctx, installPlan); err != nil {
-				return fmt.Errorf("failed to run %s hook: %v", extensionHookName, err)
-			}
-		}
-
 	}
 
 	return nil
@@ -73,7 +66,7 @@ func (h *WhizardMonitoringHook) Run(ctx context.Context, cli client.Client, cfg 
 
 type upgradeHook struct {
 	client          client.Client
-	cfg             config.ExtensionUpgradeHookConfig
+	cfg             *config.ExtensionUpgradeHookConfig
 	chartDownloader *download.ChartDownloader
 }
 

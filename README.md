@@ -14,9 +14,22 @@ Extension 支持注入特定 Annotation， 在扩展安装及升级前执行自�
 
 #### 1. 修改配置，启用该扩展升级开关
 
-修改 [defaultConfig](./pkg/config/config.go)，启用该扩展升级开关（参见 [PR](https://github.com/kubesphere-extensions/ks-extension-upgrade/pull/4) 实现）。另外可在**测试**或者**变更**场景中，在扩展部署或升级之前加载 [extension-upgrade-config.yaml](./docs/extension-upgrade-config.yaml) 配置文件，修改初始值。
+修改 [defaultConfig](./pkg/config/config.go)，启用该扩展升级开关（参见 [PR](https://github.com/kubesphere-extensions/ks-extension-upgrade/pull/4) 实现）。另外也支持在扩展组件配置 *(values.yaml)* 中增加 `global.upgradeConfig.enabled` 配置项，来启用该特性。
 
-#### 2. 在 Extension 配置中增加特定 Annotations 
+```yaml
+global:
+  upgradeConfig:
+    enabled: true
+    installCrds: true
+    upgradeCrds: true
+    # mergeValues: false
+    # failurePolicy: 0
+    # dynamicOptions:
+    #   key: value
+```
+
+
+#### 2. 为扩展组件增加特定 Annotations 
 
 可在扩展的 extension.yaml 中注入如下 annotations，启用该特性。  
 
@@ -28,8 +41,8 @@ displayName:
   zh: WizTelemetry 监控
   en: WizTelemetry Monitoring
 annotations:
-  executor-hook-image.kubesphere.io/install: kubesphere/ks-extension-upgrade:v0.1.0
-  executor-hook-image.kubesphere.io/upgrade: kubesphere/ks-extension-upgrade:v0.1.0
+  executor-hook-image.kubesphere.io/install: kubesphere/ks-extension-upgrade:v0.2.0
+  executor-hook-image.kubesphere.io/upgrade: kubesphere/ks-extension-upgrade:v0.2.0
 ```
 
 ### Issues

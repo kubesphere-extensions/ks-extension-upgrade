@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chart/loader"
@@ -19,9 +20,34 @@ import (
 	kscorev1alpha1 "kubesphere.io/api/core/v1alpha1"
 	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
-
-	"github.com/kubesphere-extensions/upgrade/pkg/config"
 )
+
+func (c *CoreHelper) loadLocalChartFile(chartFile string, valuesFile string) (*chart.Chart, error) {
+	chartBuf, err := c.chartDownloader.Download(chartFile)
+	if err != nil {
+		return nil, err
+	}
+	chart, err := loader.LoadArchive(chartBuf)
+	if err != nil {
+		return nil, err
+	}
+	if valuesFile != "" {
+		buff, err := os.ReadFile(valuesFile)
+		if err != nil {
+			return nil, err
+		}
+		values, err := chartutil.ReadValues(buff)
+		if err != nil {
+			return nil, err
+		}
+		v, err := chartutil.MergeValues(chart, values)
+		if err != nil {
+			return nil, err
+		}
+		chart.Values = v
+	}
+	return chart, nil
+}
 
 func (c *CoreHelper) LoadChart(ctx context.Context, extensionVersion *kscorev1alpha1.ExtensionVersion) (*chart.Chart, error) {
 
@@ -55,13 +81,7 @@ func (c *CoreHelper) LoadChart(ctx context.Context, extensionVersion *kscorev1al
 
 func (c *CoreHelper) applyCRDsFromLocalChart(ctx context.Context) error {
 
-	var chartFile string
-	if config.GetHookEnvInstallTag() == config.InstallTagExtension {
-		chartFile = fmt.Sprintf("/tmp/helm-executor/%s.tgz", config.GetHookEnvInstallPlanName())
-	} else {
-		chartFile = fmt.Sprintf("/tmp/helm-executor/%s-agent.tgz", config.GetHookEnvInstallPlanName())
-	}
-	chartBuf, err := c.chartDownloader.Download(chartFile)
+	chartBuf, err := c.chartDownloader.Download(fmt.Sprintf("%s.tgz", c.releaseName))
 	if err != nil {
 		return err
 	}
