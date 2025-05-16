@@ -3,8 +3,8 @@ package core
 import (
 	"context"
 	"fmt"
+	"strings"
 
-	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -21,7 +21,9 @@ import (
 )
 
 type CoreHelper struct {
-	config          *config.Config
+	releaseName     string
+	extensionName   string
+	cfg             *config.ExtensionUpgradeHookConfig
 	client          runtimeclient.Client
 	scheme          *runtime.Scheme
 	dynamicClient   *dynamic.DynamicClient
@@ -44,50 +46,59 @@ func NewCoreHelper() (*CoreHelper, error) {
 		return nil, fmt.Errorf("failed to create client: %s", err)
 	}
 
-	config, err := config.NewConfig(context.Background(), client)
-	if err != nil {
-		return nil, errors.Errorf("failed to get config: %s", err)
-	}
-
 	dynamicClient, err := dynamic.NewForConfig(restConfig)
 	if err != nil {
-		return nil, errors.Errorf("failed to create dynamic client: %s", err)
+		return nil, fmt.Errorf("failed to create dynamic client: %s", err)
 	}
 
-	if config.DownloadOptions == nil {
-		config.DownloadOptions = download.NewDefaultOptions()
-	}
-	chartDownloader, err := download.NewChartDownloader(config.DownloadOptions)
+	chartDownloader, err := download.NewChartDownloader(config.NewConfig().DownloadOptions)
 	if err != nil {
-		return nil, errors.Errorf("failed to create chartDownloader client: %s", err)
+		return nil, fmt.Errorf("failed to create chartDownloader client: %s", err)
 	}
-
-	return &CoreHelper{
+	releaseName := config.GetHookEnvReleaseName()
+	extensionName := releaseName
+	if strings.HasSuffix(releaseName, "-agent") {
+		extensionName = strings.TrimSuffix(releaseName, "-agent")
+	}
+	c := &CoreHelper{
+		releaseName:     releaseName,
+		extensionName:   extensionName,
 		dynamicClient:   dynamicClient,
 		chartDownloader: chartDownloader,
 		client:          client,
-		config:          config,
 		scheme:          scheme,
-	}, nil
+	}
+
+	chart, err := c.loadLocalChartFile(fmt.Sprintf("%s.tgz", c.releaseName), "values.yaml")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load chart: %s", err)
+	}
+	cfg, err := config.LoadConfigFromHelmValues(chart.Values)
+	if err != nil {
+		klog.Errorf("failed to load config from helm values: %s", err)
+
+		klog.Info("try to use default config")
+		if defaultCfg, ok := config.NewConfig().ExtensionUpgradeHookConfigs[extensionName]; ok {
+			cfg = &defaultCfg
+		}
+	}
+
+	klog.Infof("extension %s upgrade config: %+v", c.extensionName, cfg)
+	c.cfg = cfg
+
+	return c, nil
 }
 
 func (c *CoreHelper) Run(ctx context.Context) error {
 
-	name := config.GetHookEnvInstallPlanName()
-	if name == "" {
-		klog.Info("install plan name is empty")
-		return nil
-	}
-
-	extensionHookConfig, ok := c.config.ExtensionUpgradeHookConfigs[name]
-	if !ok || !extensionHookConfig.Enabled {
-		klog.Info("extension hook config not enabled")
+	if c.cfg == nil || !c.cfg.Enabled {
+		klog.Info("config not found, skip extension upgrade")
 		return nil
 	}
 
 	// apply crds
-	if config.GetHookEnvAction() == config.ActionInstall && extensionHookConfig.InstallCrds ||
-		config.GetHookEnvAction() == config.ActionUpgrade && extensionHookConfig.UpgradeCrds {
+	if config.GetHookEnvAction() == config.ActionInstall && c.cfg.InstallCrds ||
+		config.GetHookEnvAction() == config.ActionUpgrade && c.cfg.UpgradeCrds {
 
 		klog.Info("force update of crd before extension installation or upgrade")
 
@@ -97,14 +108,14 @@ func (c *CoreHelper) Run(ctx context.Context) error {
 
 	}
 
-	if config.GetHookEnvInstallTag() == config.InstallTagExtension {
+	if !strings.HasSuffix(c.releaseName, "-agent") {
 		installPlan := &kscorev1alpha1.InstallPlan{}
-		if err := c.client.Get(ctx, runtimeclient.ObjectKey{Name: name}, installPlan); err != nil {
+		if err := c.client.Get(ctx, runtimeclient.ObjectKey{Name: c.extensionName}, installPlan); err != nil {
 			return err
 		}
 		// merge and patch values
 		if config.GetHookEnvAction() == config.ActionUpgrade && installPlan.Spec.Extension.Version != installPlan.Status.Version &&
-			extensionHookConfig.MergeValues {
+			c.cfg.MergeValues {
 
 			klog.Info("force merge values before extension version upgrade")
 
@@ -120,9 +131,14 @@ func (c *CoreHelper) Run(ctx context.Context) error {
 
 func (c *CoreHelper) RunHooks(ctx context.Context) error {
 
-	if hook, ok := hooks.GetHook(config.GetHookEnvInstallPlanName()); ok {
-		klog.Infof("running hook: %s\n", config.GetHookEnvInstallPlanName())
-		if err := hook.Run(ctx, c.client, c.config); err != nil {
+	if c.cfg == nil || !c.cfg.Enabled {
+		klog.Info("config not found, skip extension upgrade hook")
+		return nil
+	}
+
+	if hook, ok := hooks.GetHook(c.extensionName); ok {
+		klog.Infof("running hook: %s\n", c.extensionName)
+		if err := hook.Run(ctx, c.client, c.cfg); err != nil {
 			return fmt.Errorf("failed to run hook: %s", err)
 		}
 	}

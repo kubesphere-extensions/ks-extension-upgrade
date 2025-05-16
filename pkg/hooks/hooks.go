@@ -9,7 +9,7 @@ import (
 )
 
 type Hook interface {
-	Run(ctx context.Context, cli client.Client, cfg *config.Config) error
+	Run(ctx context.Context, cli client.Client, cfg *config.ExtensionUpgradeHookConfig) error
 }
 
 var hookRegistry = make(map[string]Hook)
