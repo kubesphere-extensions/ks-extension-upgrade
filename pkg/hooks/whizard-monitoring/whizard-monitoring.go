@@ -11,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/version"
+	"k8s.io/klog/v2"
 	kscorev1alpha1 "kubesphere.io/api/core/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
@@ -53,10 +54,12 @@ func (h *WhizardMonitoringHook) Run(ctx context.Context, cli client.Client, cfg 
 	expectVersion := version.MustParseSemantic(installPlan.Spec.Extension.Version)
 	currentVersion := version.MustParseSemantic(installPlan.Status.Version)
 
-	v12 := version.MustParseSemantic("1.2.0")
+	v12 := version.MustParseSemantic("1.2.0-0")
 	// Upgrade from < 1.2.0 to >= 1.2.0
-	if currentVersion.LessThan(v12) && expectVersion.GreaterThan(v12) {
+	if currentVersion.LessThan(v12) && (expectVersion.GreaterThan(v12) || expectVersion.EqualTo(v12)) {
+		klog.Infof("whizard-monitoring currentVersion: %s, expectVersion: %s, check if need to install whizard-monitoring-pro extension", currentVersion, expectVersion)
 		if err := hook.installWhizardMonitoringProExtension(ctx, installPlan); err != nil {
+			klog.Errorf("failed to run %s hook: %v", extensionHookName, err)
 			return fmt.Errorf("failed to run %s hook: %v", extensionHookName, err)
 		}
 	}
@@ -74,19 +77,20 @@ func (h *upgradeHook) installWhizardMonitoringProExtension(ctx context.Context, 
 
 	installPlanValues, err := chartutil.ReadValues([]byte(installPlan.Spec.Config))
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to parse installPlan config: %v", err)
 	}
 
 	whizardEnabled, err := installPlanValues.PathValue("whizard.enabled")
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to parse values from whizard.enabled: %v", err)
 	}
 
 	whizardAgentProxyEnabled, err := installPlanValues.PathValue("whizardAgentProxy.enabled")
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to parse values from whizardAgentProxy.enabled: %v", err)
 	}
 	if whizardEnabled.(bool) && whizardAgentProxyEnabled.(bool) {
+		klog.Info("whizard and whizardAgentProxy are enabled, install whizard-monitoring-pro extension")
 		whizardMonitoringProExtension := &kscorev1alpha1.Extension{}
 		if err := h.client.Get(ctx, client.ObjectKey{Name: WhizardMonitoringProExtensionName}, whizardMonitoringProExtension); err != nil {
 			return err
@@ -101,7 +105,6 @@ func (h *upgradeHook) installWhizardMonitoringProExtension(ctx context.Context, 
 			}
 
 			var chartBuf *bytes.Buffer
-
 			if whizardMonitoringProExtensionVersion.Spec.ChartURL != "" {
 				if chartBuf, err = h.chartDownloader.Download(whizardMonitoringProExtensionVersion.Spec.ChartURL); err != nil {
 					return fmt.Errorf("failed to download chart %s: %v", whizardMonitoringProExtensionVersion.Spec.ChartURL, err)
@@ -125,17 +128,14 @@ func (h *upgradeHook) installWhizardMonitoringProExtension(ctx context.Context, 
 			}
 
 			whizardMonitoringProExtensionDefaultValues := chartutil.Values(chart.Values)
-
 			whizardGatewayUrl, err := installPlanValues.PathValue("whizard-agent-proxy.config.gatewayUrl")
 			if err != nil {
 				return err
 			}
 
-			whizardMonitoringProExtensionDefaultValues["whizard"] = map[string]interface{}{
-				"agentProxy": map[string]interface{}{
-					"config": map[string]interface{}{
-						"gatewayUrl": whizardGatewayUrl,
-					},
+			whizardMonitoringProExtensionDefaultValues["whizard-agent-proxy"] = map[string]interface{}{
+				"config": map[string]interface{}{
+					"gatewayUrl": whizardGatewayUrl,
 				},
 			}
 			whizardMonitoringProExtensionConfig, err := yaml.Marshal(whizardMonitoringProExtensionDefaultValues)
@@ -161,7 +161,7 @@ func (h *upgradeHook) installWhizardMonitoringProExtension(ctx context.Context, 
 				},
 			}
 			if err := h.client.Create(ctx, whizardMonitoringProInstallPlan); err != nil {
-				return nil
+				return err
 			}
 		}
 	}
