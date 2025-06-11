@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"helm.sh/helm/v3/pkg/chart"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -17,17 +18,17 @@ import (
 	"github.com/kubesphere-extensions/upgrade/pkg/config"
 	"github.com/kubesphere-extensions/upgrade/pkg/hooks"
 	_ "github.com/kubesphere-extensions/upgrade/pkg/hooks/whizard-monitoring"
-	"github.com/kubesphere-extensions/upgrade/pkg/utils/download"
 )
 
 type CoreHelper struct {
-	releaseName     string
-	extensionName   string
-	cfg             *config.ExtensionUpgradeHookConfig
-	client          runtimeclient.Client
-	scheme          *runtime.Scheme
-	dynamicClient   *dynamic.DynamicClient
-	chartDownloader *download.ChartDownloader
+	extensionName string
+	isExtension   bool
+	cfg           *config.ExtensionUpgradeHookConfig
+	chart         *chart.Chart
+
+	client        runtimeclient.Client
+	scheme        *runtime.Scheme
+	dynamicClient *dynamic.DynamicClient
 }
 
 func NewCoreHelper() (*CoreHelper, error) {
@@ -51,25 +52,21 @@ func NewCoreHelper() (*CoreHelper, error) {
 		return nil, fmt.Errorf("failed to create dynamic client: %s", err)
 	}
 
-	chartDownloader, err := download.NewChartDownloader(config.NewConfig().DownloadOptions)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create chartDownloader client: %s", err)
-	}
-	releaseName := config.GetHookEnvReleaseName()
-	extensionName := releaseName
-	if strings.HasSuffix(releaseName, "-agent") {
-		extensionName = strings.TrimSuffix(releaseName, "-agent")
+	extensionName := config.GetHookEnvReleaseName()
+	isExtension := true
+	if strings.HasSuffix(config.GetHookEnvReleaseName(), "-agent") {
+		extensionName = strings.TrimSuffix(config.GetHookEnvReleaseName(), "-agent")
+		isExtension = false
 	}
 	c := &CoreHelper{
-		releaseName:     releaseName,
-		extensionName:   extensionName,
-		dynamicClient:   dynamicClient,
-		chartDownloader: chartDownloader,
-		client:          client,
-		scheme:          scheme,
+		extensionName: extensionName,
+		isExtension:   isExtension,
+		dynamicClient: dynamicClient,
+		client:        client,
+		scheme:        scheme,
 	}
 
-	chart, err := c.loadLocalChartFile(fmt.Sprintf("%s.tgz", c.releaseName), "values.yaml")
+	chart, err := loadChart(config.GetHookEnvChartPath(), "values.yaml")
 	if err != nil {
 		return nil, fmt.Errorf("failed to load chart: %s", err)
 	}
@@ -83,8 +80,9 @@ func NewCoreHelper() (*CoreHelper, error) {
 		}
 	}
 
-	klog.Infof("extension %s upgrade config: %+v", c.extensionName, cfg)
+	c.chart = chart
 	c.cfg = cfg
+	klog.Infof("extension %s upgrade config: %+v", c.extensionName, cfg)
 
 	return c, nil
 }
@@ -102,13 +100,22 @@ func (c *CoreHelper) Run(ctx context.Context) error {
 
 		klog.Info("force update of crd before extension installation or upgrade")
 
-		if err := c.applyCRDsFromLocalChart(ctx); err != nil {
-			return err
+		/*
+			if err := c.applyCRDsFromChart(ctx); err != nil {
+				return err
+			}
+		*/
+
+		if c.isExtension {
+			c.applyCRDsFromSubchartsByTag(ctx, "extension")
+		} else {
+			c.applyCRDsFromSubchartsByTag(ctx, "agent")
 		}
 
+		klog.Info("crds applied successfully")
 	}
 
-	if !strings.HasSuffix(c.releaseName, "-agent") {
+	if c.isExtension {
 		installPlan := &kscorev1alpha1.InstallPlan{}
 		if err := c.client.Get(ctx, runtimeclient.ObjectKey{Name: c.extensionName}, installPlan); err != nil {
 			return err
