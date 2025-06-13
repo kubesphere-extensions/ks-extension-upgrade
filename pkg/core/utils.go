@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/kubesphere-extensions/upgrade/pkg/config"
+	"github.com/kubesphere-extensions/upgrade/pkg/utils/download"
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/chartutil"
@@ -22,8 +24,12 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-func (c *CoreHelper) loadLocalChartFile(chartFile string, valuesFile string) (*chart.Chart, error) {
-	chartBuf, err := c.chartDownloader.Download(chartFile)
+func loadChart(chartFile string, valuesFile string) (*chart.Chart, error) {
+	chartDownloader, err := download.NewChartDownloader(config.NewConfig().DownloadOptions)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create chart downloader: %v", err)
+	}
+	chartBuf, err := chartDownloader.Download(chartFile)
 	if err != nil {
 		return nil, err
 	}
@@ -49,50 +55,12 @@ func (c *CoreHelper) loadLocalChartFile(chartFile string, valuesFile string) (*c
 	return chart, nil
 }
 
-func (c *CoreHelper) LoadChart(ctx context.Context, extensionVersion *kscorev1alpha1.ExtensionVersion) (*chart.Chart, error) {
-
-	var chartBuf *bytes.Buffer
-	var err error
-
-	if extensionVersion.Spec.ChartURL != "" {
-		if chartBuf, err = c.chartDownloader.Download(extensionVersion.Spec.ChartURL); err != nil {
-			return nil, fmt.Errorf("failed to download chart %s: %v", extensionVersion.Spec.ChartURL, err)
-		}
-	} else if extensionVersion.Spec.ChartDataRef != nil {
-		cm := corev1.ConfigMap{}
-
-		if err := c.client.Get(ctx, types.NamespacedName{Name: extensionVersion.Spec.ChartDataRef.Name, Namespace: extensionVersion.Spec.ChartDataRef.Namespace}, &cm); err != nil {
-			return nil, fmt.Errorf("failed to get configmap %s: %v", cm.Name, err)
-		}
-		chartBytes, ok := cm.BinaryData[extensionVersion.Spec.ChartDataRef.Key]
-		if !ok {
-			return nil, fmt.Errorf("failed to get chart data from configmap %s", cm.Name)
-		}
-		chartBuf = bytes.NewBuffer(chartBytes)
-	}
-
-	chart, err := loader.LoadArchive(chartBuf)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load chart data: %v", err)
-	}
-	return chart, nil
-
-}
-
-func (c *CoreHelper) applyCRDsFromLocalChart(ctx context.Context) error {
-
-	chartBuf, err := c.chartDownloader.Download(fmt.Sprintf("%s.tgz", c.releaseName))
-	if err != nil {
-		return err
-	}
-	chart, err := loader.LoadArchive(chartBuf)
-	if err != nil {
-		return fmt.Errorf("failed to load chart data: %v", err)
-	}
+func (c *CoreHelper) applyCRDsFromChart(ctx context.Context) error {
 
 	crdClient := c.dynamicClient.Resource(apiextensionsv1.SchemeGroupVersion.WithResource("customresourcedefinitions"))
 	codecs := serializer.NewCodecFactory(c.scheme)
-	for _, chartCRD := range chart.CRDObjects() {
+
+	for _, chartCRD := range c.chart.CRDObjects() {
 		obj, _, err := codecs.UniversalDeserializer().Decode(chartCRD.File.Data, nil, nil)
 		if err != nil {
 			return fmt.Errorf("failed to decode chart crd: %v", err)
@@ -114,6 +82,49 @@ func (c *CoreHelper) applyCRDsFromLocalChart(ctx context.Context) error {
 	return nil
 }
 
+func (c *CoreHelper) applyCRDsFromSubchartsByTag(ctx context.Context, tag string) error {
+	crdClient := c.dynamicClient.Resource(apiextensionsv1.SchemeGroupVersion.WithResource("customresourcedefinitions"))
+	codecs := serializer.NewCodecFactory(c.scheme)
+
+	// 只遍历 dependencies，筛选 tags 包含指定 tag 的子 chart
+	for _, dep := range c.chart.Metadata.Dependencies {
+		hasTag := false
+		for _, t := range dep.Tags {
+			if t == tag {
+				hasTag = true
+				break
+			}
+		}
+		if !hasTag {
+			continue
+		}
+		// 查找已加载的子 chart
+		for _, sub := range c.chart.Dependencies() {
+			if sub.Metadata.Name == dep.Name {
+				for _, chartCRD := range sub.CRDObjects() {
+					obj, _, err := codecs.UniversalDeserializer().Decode(chartCRD.File.Data, nil, nil)
+					if err != nil {
+						return fmt.Errorf("failed to decode chart crd: %v", err)
+					}
+					crd, ok := obj.(*apiextensionsv1.CustomResourceDefinition)
+					if !ok {
+						continue
+					}
+					unStr, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+					if err != nil {
+						return err
+					}
+					klog.Infof("applying crd from subchart %s: %s\n", sub.Metadata.Name, crd.Name)
+					if _, err := crdClient.Apply(ctx, crd.Name, &unstructured.Unstructured{Object: unStr}, metav1.ApplyOptions{FieldManager: "kubectl", Force: true}); err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func (c *CoreHelper) mergeValuesFromExtensionChart(ctx context.Context, installPlan *kscorev1alpha1.InstallPlan) error {
 
 	extensionVersion := &kscorev1alpha1.ExtensionVersion{}
@@ -122,9 +133,33 @@ func (c *CoreHelper) mergeValuesFromExtensionChart(ctx context.Context, installP
 		return err
 	}
 
-	extensionChart, err := c.LoadChart(ctx, extensionVersion)
+	var chartBuf *bytes.Buffer
+	var err error
+
+	if extensionVersion.Spec.ChartURL != "" {
+		chartDownloader, err := download.NewChartDownloader(config.NewConfig().DownloadOptions)
+		if err != nil {
+			return fmt.Errorf("failed to create chart downloader: %v", err)
+		}
+		if chartBuf, err = chartDownloader.Download(extensionVersion.Spec.ChartURL); err != nil {
+			return fmt.Errorf("failed to download chart %s: %v", extensionVersion.Spec.ChartURL, err)
+		}
+	} else if extensionVersion.Spec.ChartDataRef != nil {
+		cm := corev1.ConfigMap{}
+
+		if err := c.client.Get(ctx, types.NamespacedName{Name: extensionVersion.Spec.ChartDataRef.Name, Namespace: extensionVersion.Spec.ChartDataRef.Namespace}, &cm); err != nil {
+			return fmt.Errorf("failed to get configmap %s: %v", cm.Name, err)
+		}
+		chartBytes, ok := cm.BinaryData[extensionVersion.Spec.ChartDataRef.Key]
+		if !ok {
+			return fmt.Errorf("failed to get chart data from configmap %s", cm.Name)
+		}
+		chartBuf = bytes.NewBuffer(chartBytes)
+	}
+
+	extensionChart, err := loader.LoadArchive(chartBuf)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to load chart data: %v", err)
 	}
 
 	klog.Infof("installPlan values: %s\n", installPlan.Spec.Config)
