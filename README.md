@@ -3,14 +3,15 @@
 通用的 KubeSphere Extension 升级 Hook, 主要解决 **Extension 安装及升级时无法更新 CRD 问题**。当前支持以下特性：
 
 - 支持扩展组件安装及升级时强制更新 CRD
-- 支持升级时将当前 InstallPlan Config 与升级版本的默认 Values 进行合并
-- 扩展组件额外支持
-    - `whizard-monitoring` 从 1.1.x 及 1.0.x 升级至 1.2.x 将 whizard 拆离，并创建新扩展 `whizard-monitoring-pro`
+- 扩展组件自定义支持
+    - `whizard-monitoring` 从 1.1.x(1.0.x) 平滑升级至 1.2.x, 若启用旧版 Whizard 可观测中心，会将 whizard 剥离，并创建新扩展 `whizard-monitoring-pro`
 
 
 ### Quick start
 
-Extension 支持注入特定 Annotation， 在扩展安装及升级前执行自定义操作，在当前版本 (ks 4.1.x ~ 4.2) 配置为镜像地址形式。 当扩展在安装和升级之前， `ks-extension-upgrade` 将作为 `helm-install-extension`/`helm-upgrade-extension` Job 的 InitContainer 镜像 *(如 [Job 示例](./docs/helm-upgrade-extension-job.yaml) 所示)*， 执行强制更新 CRD。
+> 版本要求： KSE >= v4.2.0, ks-extension-upgrade >= v0.3.0;
+
+Extension 允许注入特定 Annotation， 在扩展安装及升级前执行自定义操作，其配置方式为镜像地址。 当您按照如下方式启用时, 在扩展部署阶段， `ks-extension-upgrade` 将作为 `helm-install(upgrade)-extension` Job 的 InitContainer 镜像，在扩展安装和升级之前, 执行强制更新 CRD 等操作，即扩展的 `pre-install(pre-upgrade) hook`.
 
 #### 1. 修改配置，启用该扩展升级开关
 
@@ -36,13 +37,13 @@ global:
 ```
 apiVersion: v2
 name: whizard-monitoring
-version: 1.1.0
+version: 1.2.0
 displayName:
   zh: WizTelemetry 监控
   en: WizTelemetry Monitoring
 annotations:
-  executor-hook-image.kubesphere.io/install: kubesphere/ks-extension-upgrade:v0.2.0
-  executor-hook-image.kubesphere.io/upgrade: kubesphere/ks-extension-upgrade:v0.2.0
+  executor-hook-image.kubesphere.io/install: kubesphere/ks-extension-upgrade:v0.3.0
+  executor-hook-image.kubesphere.io/upgrade: kubesphere/ks-extension-upgrade:v0.3.0
 ```
 
 ### Issues
