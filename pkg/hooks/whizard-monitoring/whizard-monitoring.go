@@ -218,8 +218,8 @@ func (h *upgradeHook) installWhizardMonitoringProExtension(ctx context.Context, 
 			},
 
 			Spec: kscorev1alpha1.InstallPlanSpec{
-				ClusterScheduling: whizardMonitoringInstallPlan.Spec.ClusterScheduling,
-				Config:            string(whizardMonitoringProExtensionConfig),
+				Enabled: true,
+				Config:  string(whizardMonitoringProExtensionConfig),
 				Extension: kscorev1alpha1.ExtensionRef{
 					Name:    "whizard-monitoring-pro",
 					Version: whizardMonitoringProExtension.Status.RecommendedVersion,
