@@ -123,7 +123,7 @@ func genWhizardMonitoringSmoothUpgradeConfig(config string) (string, error) {
 	}
 
 	// subchart  whizard-monitoring-helper has been renamed to wiztelemetry-monitoring-helper in v1.2.0
-	if _, err := installPlanValues.PathValue("whizard-monitoring-helper"); err != nil {
+	if _, err := installPlanValues.Table("whizard-monitoring-helper"); err == nil {
 		installPlanValues["wiztelemetry-monitoring-helper"] = installPlanValues["whizard-monitoring-helper"]
 	}
 
