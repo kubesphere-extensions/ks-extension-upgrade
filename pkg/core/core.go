@@ -17,6 +17,7 @@ import (
 
 	"github.com/kubesphere-extensions/upgrade/pkg/config"
 	"github.com/kubesphere-extensions/upgrade/pkg/hooks"
+	_ "github.com/kubesphere-extensions/upgrade/pkg/hooks/devops"
 	_ "github.com/kubesphere-extensions/upgrade/pkg/hooks/whizard-monitoring"
 )
 
