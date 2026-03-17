@@ -30,7 +30,7 @@ type ChartDownloader struct {
 func NewDefaultOptions() *Options {
 	return &Options{
 		HttpOptions: &HttpDownloaderOptions{
-			Timeout:            5,
+			Timeout:            30,
 			InsecureSkipVerify: true,
 		},
 	}
